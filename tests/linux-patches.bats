@@ -11,6 +11,7 @@
 #   * linux-early-singleton.sh           -> take the single-instance lock before init
 #   * helper-env.sh                      -> spreads process.env into the helper env
 #   * linux-disable-pill-drag.sh         -> force the drag-overlay flag false on Linux
+#   * linux-pin-pill-primary.sh          -> park the status pill on the primary display
 #   * linux-main-shortcut-defaults.sh   -> Linux seeds the Windows chord map in main
 #   * linux-xdg-data-dir.sh             -> app data and logs dirs under XDG_CONFIG_HOME
 #   * linux-autostart.sh                -> login items backed by an XDG autostart entry
@@ -511,6 +512,63 @@ JS
 	run bash "$PATCH_DIR/linux-disable-pill-drag.sh" "$FIX"
 	[[ "$status" -ne 0 ]]
 	! grep -q 'WISPR_LINUX_DISABLE_PILL_DRAG' "$FIX"
+}
+
+# =============================================================================
+# linux-pin-pill-primary.sh
+# =============================================================================
+
+# Shipped 1.6.1209 shape: the monitorMove interval and its contextMenuMove
+# sibling destructure the same two screen methods; only the former is ours.
+write_pill_monitor_fixture() {
+	cat > "$FIX" <<'JS'
+var o=()=>({warn(){},info(){}}),X={isLocked:()=>!1,acquire:async()=>{}},_=X;
+var i={screen:{getCursorScreenPoint:()=>({x:5,y:5}),getDisplayNearestPoint:()=>({id:"cursor"}),getPrimaryDisplay:()=>({id:"primary"})}};
+var cm=async()=>{if(_.isLocked())return void o().warn("Context menu move mutex is locked, skipping contextMenuMove interval");await _.acquire();const{getCursorScreenPoint:e,getDisplayNearestPoint:t}=i.screen,n=t(e());return n.id};
+var ke=async()=>{if(X.isLocked())return void o().warn("Monitor move mutex is locked, skipping monitorMove interval");await X.acquire();const{getCursorScreenPoint:e,getDisplayNearestPoint:t}=i.screen,n=t(e()),r=1;return n.id};
+module.exports={cm,ke};
+JS
+}
+
+@test "pin-pill: monitorMove picks the primary display, contextMenuMove untouched" {
+	write_pill_monitor_fixture
+	run bash "$PATCH_DIR/linux-pin-pill-primary.sh" "$FIX"
+	[[ "$status" -eq 0 ]]
+	grep -qF 'i.screen,n=/*WISPR_LINUX_PIN_PILL_PRIMARY*/"linux"===process.platform&&!process.env.WISPR_PILL_FOLLOW_CURSOR?i.screen.getPrimaryDisplay():t(e()),r=1;' "$FIX"
+	[[ "$(grep -o 'WISPR_LINUX_PIN_PILL_PRIMARY' "$FIX" | wc -l)" -eq 1 ]]
+	grep -qF 'contextMenuMove interval");await _.acquire();const{getCursorScreenPoint:e,getDisplayNearestPoint:t}=i.screen,n=t(e());' "$FIX"
+	node_check "$FIX"
+}
+
+@test "pin-pill: the patched lookup resolves primary, or cursor when opted out" {
+	write_pill_monitor_fixture
+	bash "$PATCH_DIR/linux-pin-pill-primary.sh" "$FIX"
+	local probe='const m=require(process.argv[1]);'
+	probe+='Promise.all([m.ke(),m.cm()]).then(r=>console.log(r.join(",")))'
+	run node -e "$probe" "$FIX"
+	[[ "$output" == 'primary,cursor' ]]
+	WISPR_PILL_FOLLOW_CURSOR=1 run node -e "$probe" "$FIX"
+	[[ "$output" == 'cursor,cursor' ]]
+}
+
+@test "pin-pill: idempotent on second run" {
+	write_pill_monitor_fixture
+	bash "$PATCH_DIR/linux-pin-pill-primary.sh" "$FIX"
+	assert_idempotent "$PATCH_DIR/linux-pin-pill-primary.sh" "$FIX"
+}
+
+@test "pin-pill: bails non-zero when the lookup no longer follows the log string" {
+	# Near miss: same developer string, but the display comes from somewhere
+	# other than the cursor lookup. Must fail closed for a re-audit.
+	cat > "$FIX" <<'JS'
+var o=()=>({warn(){}}),X={isLocked:()=>!1,acquire:async()=>{}},i={screen:{}};
+var ke=async()=>{if(X.isLocked())return void o().warn("Monitor move mutex is locked, skipping monitorMove interval");await X.acquire();const{getCursorScreenPoint:e,getDisplayNearestPoint:t}=i.screen,n=t({x:0,y:0})};
+JS
+	run bash "$PATCH_DIR/linux-pin-pill-primary.sh" "$FIX"
+	[[ "$status" -ne 0 ]]
+	[[ "$output" == *'found 0'* ]]
+	run grep -q 'WISPR_LINUX_PIN_PILL_PRIMARY' "$FIX"
+	[[ "$status" -ne 0 ]]
 }
 
 # =============================================================================

@@ -40,6 +40,7 @@ declare -gA MARKER_SAMPLES=(
 	[deeplink]='if(f.H8||"linux"===process.platform){/*WISPR_LINUX_DEEPLINK*/const e=process.argv.find(x=>x.startsWith("wispr-flow:"));}'
 	[earlysingleton]='/*WISPR_LINUX_EARLY_SINGLETON_V1*/try{var __wisprApp=require("electron").app;if(__wisprApp&&!__wisprApp.requestSingleInstanceLock()){__wisprApp.quit(),process.exit(0)}}catch(__wisprErr){}'
 	[pilldrag]='re=e=>{e=(/*WISPR_LINUX_DISABLE_PILL_DRAG*/"linux"===process.platform)?!1:e}'
+	[pinpill]='n=/*WISPR_LINUX_PIN_PILL_PRIMARY*/"linux"===process.platform&&!process.env.WISPR_PILL_FOLLOW_CURSOR?i.screen.getPrimaryDisplay():t(e())'
 	[shortcutdefaults]='(r.H8||"linux"===process.platform)/*WISPR_LINUX_MAIN_SHORTCUT_DEFAULTS*/?pe:ce'
 	[autostart]='/*WISPR_LINUX_AUTOSTART*/;(function(){if(process.platform!=="linux")return;})();'
 	[xdgdatadir]='f=u?o().join(process.env.APPDATA||"","Wispr Flow"):("linux"===process.platform/*WISPR_LINUX_XDG_DATA_DIR*/?o().join(process.env.XDG_CONFIG_HOME||o().join(i().homedir(),".config"),"Wispr Flow"):o().join(i().homedir(),"Library","Application Support","Wispr Flow"))'
@@ -179,6 +180,14 @@ write_fixture() {
 @test "verify: exits 1 when the pilldrag marker is missing" {
 	local fixture
 	fixture="$(write_fixture pilldrag)"
+	run "$VERIFY_SH" "$fixture"
+	[[ "$status" -eq 1 ]]
+	[[ "$output" == *'MISSING'* ]]
+}
+
+@test "verify: exits 1 when the pin-pill marker is missing" {
+	local fixture
+	fixture="$(write_fixture pinpill)"
 	run "$VERIFY_SH" "$fixture"
 	[[ "$status" -eq 1 ]]
 	[[ "$output" == *'MISSING'* ]]

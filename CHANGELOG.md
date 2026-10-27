@@ -32,6 +32,17 @@ Flow app version is tracked separately by the `+wispr{X.Y.Z}` suffix.
   on the first start after the update, and skips the move while an instance
   holds the lock or when any file would be overwritten. `--doctor` warns
   while a legacy dir remains.
+- A deb or rpm built from Wispr 1.6.999 or later no longer installs
+  `resources/` and `resources/Release/` as root-only `0700` directories that
+  a normal user cannot read. The installer's zip entries carry no unix
+  modes, so `build-linux.sh` step 2 now normalizes the staged tree
+  (directories `0755`, files readable, no group/other write) instead of
+  inheriting whatever 7z produced.
+- The status pill stays on the primary display on Linux instead of sticking
+  to whichever monitor last had the pointer over an XWayland window.
+  `linux-pin-pill-primary.sh` points the main process's 400 ms
+  `monitorMove` lookup at `screen.getPrimaryDisplay()`. Set
+  `WISPR_PILL_FOLLOW_CURSOR=1` to get the cursor-following behaviour back.
 
 ### Changed
 
