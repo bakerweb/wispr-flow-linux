@@ -119,6 +119,13 @@ if [[ -n $appimage_file ]]; then
 	fi
 	# AppImage runs as the (non-root) user; AppRun passes --no-sandbox.
 	run_launch_smoke_test 'AppImage' "$appimage_file" '' "$appimage_file"
+	# The push-to-talk run swaps the helper for a fake, so it only ever runs
+	# against the throwaway extraction, never a staged AppDir from the build.
+	if [[ -n ${extract_dir:-} && $appdir == "$extract_dir"/* ]]; then
+		run_dictation_e2e_test 'AppImage' "$appdir"
+	else
+		pass 'Skipping dictation e2e test (no extracted AppDir)'
+	fi
 else
 	pass "Skipping launch smoke test (no built .AppImage; staged AppDir only)"
 fi

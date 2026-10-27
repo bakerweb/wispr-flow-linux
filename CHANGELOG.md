@@ -21,6 +21,13 @@ Flow app version is tracked separately by the `+wispr{X.Y.Z}` suffix.
   skip the entry once the app is uninstalled, and a moved AppImage repairs
   it on its next start. `--doctor` reports the entry. Builds on
   @crafteraadarsh's shim in #69 and @vascode2's diagnosis in #81.
+- The AppImage artifact test now drives push-to-talk end to end. It swaps
+  the helper for a scripted fake (`tests/fake-helper.py`), sends left Ctrl +
+  Win through it, and checks the app maps it to push-to-talk and starts
+  dictation, after checking right Ctrl + Win does not. No keyboard or
+  account is needed; an unsigned profile stops at the `SignedOut` notice,
+  so recording and paste are not covered. `tests/test-dictation-e2e.sh`
+  runs the same check on its own.
 
 ### Fixed
 

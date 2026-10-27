@@ -272,6 +272,7 @@ _launch_smoke_cleanup() {
 	fi
 	[[ -n $_smoke_cache_root ]] && rm -rf "$_smoke_cache_root"
 	[[ -n $_smoke_xvfb_log ]] && rm -rf "$_smoke_xvfb_log"
+	_e2e_restore_helper
 }
 
 # True when a log carries the sandbox-namespace-denied signature: a CI
@@ -391,6 +392,203 @@ run_launch_smoke_test() {
 	_smoke_launch_pid=''
 	_smoke_cache_root=''
 	_smoke_xvfb_log=''
+}
+
+# Scripted push-to-talk run. Boots an AppDir under Xvfb with the helper
+# swapped for tests/fake-helper.py, then drives key events through the
+# fake's control FIFO and reads launcher.log for the app's reaction. The
+# smoke test above proves the helper handshakes; this proves the hotkey path
+# behind it works: KeypressEvent VK codes reach the keyboard service, the
+# Linux shortcut defaults (linux-main-shortcut-defaults.sh) map Ctrl+Win to
+# push-to-talk, and the action starts dictation.
+#
+# The profile is seeded with onboarding complete, because the app refuses an
+# action down before onboarding. It is never signed in, so dictation stops at
+# the SignedOut notification right after startDictation; recording, the
+# transcript and PasteText need an account and are not covered here.
+#
+# Usage:
+#   run_dictation_e2e_test <label> <appdir>
+#     appdir   a writable AppDir (an extracted AppImage) with AppRun at its
+#              root. The helper binary is moved aside for the run and put
+#              back by _e2e_restore_helper, which _launch_smoke_cleanup also
+#              calls so a caller's existing trap covers an interrupted run.
+#
+# Missing tools (xvfb-run/dbus-run-session/setsid/python3) -> skip, as in
+# run_launch_smoke_test.
+
+_e2e_helper=''
+_e2e_helper_saved=''
+
+_e2e_restore_helper() {
+	if [[ -n $_e2e_helper_saved && -e $_e2e_helper_saved ]]; then
+		mv -f "$_e2e_helper_saved" "$_e2e_helper"
+	fi
+	_e2e_helper=''
+	_e2e_helper_saved=''
+}
+
+# Write control lines to the fake helper's FIFO. The open blocks until the
+# fake has its end open, so it is bounded: a helper that never opened the
+# FIFO (the swap did not take) fails the step instead of hanging the test.
+_e2e_send() {
+	local ctl="$1"
+	shift
+	printf '%s\n' "$@" | timeout 10 tee "$ctl" >/dev/null
+}
+
+# Line number of the first match of a fixed string at or after line $3, or
+# empty. Used to assert that markers appear in order.
+_e2e_line_of() {
+	local log="$1" needle="$2" from="${3:-1}"
+	tail -n "+$from" "$log" 2>/dev/null \
+		| grep -nF -m1 -- "$needle" \
+		| { IFS=: read -r n _ && echo $((n + from - 1)); }
+}
+
+run_dictation_e2e_test() {
+	local label="$1" appdir="$2"
+	local skip="Skipping dictation e2e test for $label"
+	if ! { command -v xvfb-run && command -v dbus-run-session \
+		&& command -v setsid && command -v python3; } &>/dev/null; then
+		pass "$skip (xvfb-run/dbus-run-session/setsid/python3 missing)"
+		return
+	fi
+
+	local helper="$appdir/usr/lib/wispr-flow/resources/Release/wispr-flow-linux-helper"
+	local fake
+	fake="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fake-helper.py"
+	if [[ ! -x $appdir/AppRun || ! -f $helper ]]; then
+		fail "$label e2e: no AppRun or helper binary under $appdir"
+		return
+	fi
+	if [[ ! -w ${helper%/*} ]]; then
+		pass "$skip (helper dir not writable; needs an extracted AppDir)"
+		return
+	fi
+
+	local work home ctl launcher_log xvfb_log
+	work=$(mktemp -d)
+	home="$work/home"
+	ctl="$work/ctl"
+	launcher_log="$home/.cache/wispr-flow/launcher.log"
+	xvfb_log="$work/xvfb.log"
+	mkdir -p "$home/.config/Wispr Flow" "$home/.cache"
+	mkfifo "$ctl"
+	printf '%s\n' '{"prefs":{"user":{"onboardingCompleted":true}}}' \
+		>"$home/.config/Wispr Flow/config.json"
+	_smoke_cache_root="$work"
+
+	_e2e_helper="$helper"
+	_e2e_helper_saved="$helper.e2e-real"
+	mv "$helper" "$_e2e_helper_saved"
+	printf '#!/bin/sh\nexec python3 %q "$@"\n' "$fake" >"$helper"
+	chmod +x "$helper"
+
+	# HOME and both XDG dirs point at the scratch profile, so the run never
+	# reads or writes a developer's real Wispr Flow profile or lock.
+	setsid env "HOME=$home" "XDG_CONFIG_HOME=$home/.config" \
+		"XDG_CACHE_HOME=$home/.cache" "WISPR_FAKE_HELPER_CTL=$ctl" \
+		xvfb-run -a -s '-screen 0 1280x720x24' \
+		dbus-run-session -- "$appdir/AppRun" >"$xvfb_log" 2>&1 &
+	_smoke_launch_pid=$!
+
+	local deadline ready=0
+	deadline=$((SECONDS + 45))
+	while ((SECONDS < deadline)); do
+		if grep -qF 'Helper service is ready: true' "$launcher_log" \
+			2>/dev/null; then
+			ready=1
+			break
+		fi
+		kill -0 "$_smoke_launch_pid" 2>/dev/null || break
+		sleep 0.5
+	done
+
+	if ((ready == 0)); then
+		fail "$label e2e: app never reached helper-ready with the fake helper"
+		[[ -f $launcher_log ]] && tail -30 "$launcher_log" >&2
+		[[ -s $xvfb_log ]] && tail -15 "$xvfb_log" >&2
+		_e2e_finish
+		return
+	fi
+	pass "$label e2e: app reached helper-ready with the fake helper"
+
+	# Wrong chord first: right Ctrl (163) + Win must not trigger push-to-talk.
+	# Received-first-key proves the events reached the keyboard service, so
+	# the absence of an action below is a real negative, not a dead pipe.
+	if ! _e2e_send "$ctl" 'press 163' 'press 91' 'sleep 300' \
+		'release 91' 'release 163'; then
+		fail "$label e2e: fake helper's control FIFO never opened"
+		_e2e_finish
+		return
+	fi
+	local mark='[Keyboard Service] Received first key event'
+	deadline=$((SECONDS + 10))
+	while ((SECONDS < deadline)); do
+		grep -qF "$mark" "$launcher_log" && break
+		sleep 0.5
+	done
+	sleep 1
+	if ! grep -qF "$mark" "$launcher_log"; then
+		fail "$label e2e: keyboard service never saw a KeypressEvent"
+		_e2e_finish
+		return
+	fi
+	if grep -qF 'Ptt action down' "$launcher_log"; then
+		fail "$label e2e: right Ctrl + Win triggered push-to-talk"
+	else
+		pass "$label e2e: right Ctrl + Win does not trigger push-to-talk"
+	fi
+
+	# The default chord: left Ctrl (162) then left Win (91), held.
+	local from
+	from=$(($(wc -l <"$launcher_log") + 1))
+	_e2e_send "$ctl" 'press 162' 'sleep 50' 'press 91' 'sleep 1500' \
+		'release 91' 'release 162'
+
+	local -a markers=(
+		'[Keyboard Service] Handling action from keycodes: ctrl + win'
+		'Ptt action down. Dictation status: idle'
+		'startDictation. Dictation status: idle. Action source: keyboard'
+	)
+	local m line prev="$from" missing=''
+	deadline=$((SECONDS + 10))
+	while ((SECONDS < deadline)); do
+		[[ -n $(_e2e_line_of "$launcher_log" "${markers[-1]}" "$from") ]] \
+			&& break
+		sleep 0.5
+	done
+	for m in "${markers[@]}"; do
+		line=$(_e2e_line_of "$launcher_log" "$m" "$prev")
+		if [[ -z $line ]]; then
+			missing="$m"
+			break
+		fi
+		prev="$line"
+	done
+	if [[ -n $missing ]]; then
+		fail "$label e2e: Ctrl+Win did not reach '$missing' (in order)"
+		tail -n "+$from" "$launcher_log" | grep -vF 'GetDeviceInfo' \
+			| tail -30 >&2
+	else
+		pass "$label e2e: Ctrl+Win -> ctrl + win action -> Ptt down" \
+			'-> startDictation, in order'
+	fi
+	_e2e_finish
+}
+
+_e2e_finish() {
+	if [[ -n $_smoke_launch_pid ]]; then
+		kill -TERM -- "-$_smoke_launch_pid" 2>/dev/null
+		sleep 1
+		kill -KILL -- "-$_smoke_launch_pid" 2>/dev/null
+		wait "$_smoke_launch_pid" 2>/dev/null
+	fi
+	_e2e_restore_helper
+	[[ -n $_smoke_cache_root ]] && rm -rf "$_smoke_cache_root"
+	_smoke_launch_pid=''
+	_smoke_cache_root=''
 }
 
 print_summary() {

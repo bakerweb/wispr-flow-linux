@@ -25,6 +25,7 @@ bats tests/*.bats
 | `build-workdir.bats` | What survives between builds under `build-linux/`: `scripts/build-linux.sh` step 2 keeps `downloads/` and clears every other output; `build.sh`'s `sync_stage_to_dist` mirrors the staged tree into the Electron dist exactly (stale files go, Electron's `default_app.asar` stays), with rsync and with the `cp` fallback. Step 3 opens with the tripwire pass (a junk bundle fails there by name, before any patch), skips it on a tree the first patch already marked, fails naming the patch when one misses its anchor (the real mac-gates assertion), and errors when there is no bundle to patch. |
 | `hooks.bats` | `.claude/hooks/pre-pr-lint.sh`, the Claude Code pre-push hook, against small git repos built per test: non-push tool calls are ignored; a clean tree passes naming the gates run; a warning-level shellcheck finding, a codespell hit in a tracked file, and a red bats test on a shell change each block the push (exit 2); an untracked typo is not scanned; a docs-only change skips bats. |
 | `linux-patches.bats` | `scripts/patches/linux-{renderer-chrome,window-frame,renderer-treat-as-windows,deeplink}.sh` and `helper-resolver.sh`: each patch applied to a hermetic minified-JS fixture carrying its anchor — asserts the transformation + marker, leaves unrelated sites alone, `node --check`s the result, is idempotent (second run is byte-identical), and bails non-zero when the anchor is absent. The helper-resolver fixtures carry both shipped shapes (the inline ternary through 1.6.897, the exported arrow resolver from 1.6.937), evaluate the patched resolver under node per platform, and pin the shape bound (a call-form isMac test fails closed). |
+| `fake-helper.bats` | `tests/fake-helper.py`, the scripted helper the dictation e2e run swaps in, driven over a real 4-pipe stdio: the `IsReady` ACK echoes the uuid with launch timing, `+` and `\|` survive the framing both ways, `CheckStaleKeys` reports only keys the control FIFO isn't holding, control lines become `KeypressEvent` frames with a rising `index`, unknown commands get an ACK, and it refuses to run without fd 3. |
 
 Don't have bats yet? Grab it: `sudo dnf install bats` / `sudo apt install bats`.
 
@@ -60,8 +61,26 @@ tests/test-artifact-appimage.sh  build-linux/appimage   # extracts AppImage or u
 > system-wide. The install tier is meant for clean CI containers; locally, only
 > the inspection tier ever runs.
 
+The AppImage script also runs a **scripted push-to-talk check**
+(`run_dictation_e2e_test`) on its throwaway extraction, right after the
+smoke launch. It swaps the helper for `tests/fake-helper.py`, seeds a scratch
+profile with onboarding complete, and sends key events through the fake's
+control FIFO: right Ctrl + Win must not fire push-to-talk, and left Ctrl +
+Win must log `Handling action from keycodes: ctrl + win` → `Ptt action down`
+→ `startDictation`, in order. That covers the helper's VK codes, the Linux
+shortcut defaults and the action dispatch with no keyboard and no account.
+The profile is never signed in, so the run ends at the app's `SignedOut`
+notification; recording, the transcript and `PasteText` are not covered. To
+run just this check on an AppDir you extracted yourself:
+
+```bash
+./Wispr*.AppImage --appimage-extract
+tests/test-dictation-e2e.sh squashfs-root   # moves the helper aside, restores it
+```
+
 If you go digging, the shared assertion lib plus `validate_app_contents` /
-`run_launch_smoke_test` all live in `test-artifact-common.sh`.
+`run_launch_smoke_test` / `run_dictation_e2e_test` all live in
+`test-artifact-common.sh`.
 
 ## 3. Patch-stage test against the real bundle (local, before a patch ships)
 
