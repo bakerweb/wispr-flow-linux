@@ -226,6 +226,14 @@ step2_stage_resources() {
       --exclude 'Release/Wispr Flow Helper.exe' \
       "$RESOURCES_SRC/" "$STAGE/" 2>/dev/null \
       || cp -a "$RESOURCES_SRC/." "$STAGE/"   # fallback if rsync absent
+    # The nupkg's zip entries carry no unix modes (DOS attributes only), so
+    # directory modes come from whichever 7z extracted them. From Wispr
+    # 1.6.999 the explicit directory entries came out 0700 on the CI runner,
+    # and `rsync -a` copied that onto resources/ and Release/: a root-owned
+    # deb/rpm install the user then cannot read. Normalize instead of
+    # inheriting: directories 0755, files readable, no group/other write.
+    chmod -R u+rwX,go+rX,go-w "$STAGE" \
+      || die "Failed to normalize permissions under $STAGE"
   else
     warn "Resources source missing -- skipping copy."
   fi
@@ -337,6 +345,12 @@ step3_patch_bundle() {
     auto "Running linux-disable-pill-drag.sh on $target_bundle"
     bash "$SCRIPT_DIR/patches/linux-disable-pill-drag.sh" "$target_bundle" \
       || die "linux-disable-pill-drag.sh failed -- see its output above."
+    # Park the status pill on the primary display: under XWayland the
+    # cursor point only moves over X11 windows, so cursor-following
+    # strands the pill on whichever monitor last saw one.
+    auto "Running linux-pin-pill-primary.sh on $target_bundle"
+    bash "$SCRIPT_DIR/patches/linux-pin-pill-primary.sh" "$target_bundle" \
+      || die "linux-pin-pill-primary.sh failed -- see its output above."
     # Seed fresh Linux profiles with the WINDOWS default shortcut/PTT map. The
     # main process picks the defaults with a `"win32"===process.platform` flag,
     # so on Linux it wrote the macOS map -- whose PTT key resolves to keycode -1
