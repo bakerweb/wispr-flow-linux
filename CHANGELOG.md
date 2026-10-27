@@ -8,6 +8,14 @@ Flow app version is tracked separately by the `+wispr{X.Y.Z}` suffix.
 
 ## [Unreleased]
 
+### Fixed
+
+- The status pill stays on the primary display on Linux instead of sticking
+  to whichever monitor last had the pointer over an XWayland window.
+  `linux-pin-pill-primary.sh` points the main process's 400 ms
+  `monitorMove` lookup at `screen.getPrimaryDisplay()`. Set
+  `WISPR_PILL_FOLLOW_CURSOR=1` to get the cursor-following behaviour back.
+
 ## [v1.0.5] - 2026-10-28
 
 ### Added

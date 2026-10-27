@@ -13,6 +13,7 @@
 #     * linux-hub-focusable.sh -> hub window focusable/WM-managed on Linux
 #     * linux-deeplink.sh      -> cold-start wispr-flow: argv parse on Linux
 #     * linux-disable-pill-drag.sh -> disable the status-pill drag gesture on linux
+#     * linux-pin-pill-primary.sh -> status pill parks on the primary display
 #     * linux-main-shortcut-defaults.sh -> Linux profiles seed the Windows
 #       default shortcut/push-to-talk map instead of the macOS one (whose
 #       PTT key has no Linux keycode)
@@ -64,6 +65,7 @@ MARKERS=(
   "deeplink: linux cold-start argv parse|F|WISPR_LINUX_DEEPLINK"
   "early-singleton: second instance exits before init|F|WISPR_LINUX_EARLY_SINGLETON_V1"
   "disable-pill-drag: linux drag-overlay activation forced false|F|WISPR_LINUX_DISABLE_PILL_DRAG"
+  "pin-pill-primary: linux status pill parks on the primary display|F|WISPR_LINUX_PIN_PILL_PRIMARY"
   "shortcut-defaults: linux seeds the Windows PTT map|F|WISPR_LINUX_MAIN_SHORTCUT_DEFAULTS"
   "xdg-data-dir: linux app data and logs under XDG_CONFIG_HOME|F|WISPR_LINUX_XDG_DATA_DIR"
   "autostart: linux login items backed by an XDG autostart entry|F|WISPR_LINUX_AUTOSTART"

@@ -337,6 +337,12 @@ step3_patch_bundle() {
     auto "Running linux-disable-pill-drag.sh on $target_bundle"
     bash "$SCRIPT_DIR/patches/linux-disable-pill-drag.sh" "$target_bundle" \
       || die "linux-disable-pill-drag.sh failed -- see its output above."
+    # Park the status pill on the primary display: under XWayland the
+    # cursor point only moves over X11 windows, so cursor-following
+    # strands the pill on whichever monitor last saw one.
+    auto "Running linux-pin-pill-primary.sh on $target_bundle"
+    bash "$SCRIPT_DIR/patches/linux-pin-pill-primary.sh" "$target_bundle" \
+      || die "linux-pin-pill-primary.sh failed -- see its output above."
     # Anchor the status pill's pickers (auto-polish, fetch link, extension
     # menu, shortcut-join drawer) at the pill on native Wayland, where the
     # renderer's window.screenX/Y are always 0. Main adds the status window's
